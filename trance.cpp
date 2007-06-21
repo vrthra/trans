@@ -222,7 +222,7 @@ class Trance {
 
     void poll() {
         _cur = get_fds();
-        if (select(max_fd() +1, &_cur, NULL, NULL, NULL) == -1)
+        if (select(max_fd() +1, &_cur, 0, 0, 0) == -1)
             throw e_select();
     }
 
@@ -235,36 +235,32 @@ class Trance {
         add_fd(client_fd);
     }
 
-    int process() {
+    void process() {
         // main loop
         while(true) {
             poll();
             // run through the existing connections looking for data to read
             for(int i = 0; i <= max_fd(); i++) {
-                if (has_fd(i)) { // we got one!!
-                    try {
-                        if (_server.is_listener(i)) {
-                            // handle new connections
-                            int fd = _server.accept();
-                            int client_fd = _client.connect(fd);
-                            update_fds(fd, client_fd);
-                        } else {
-                            // we got some data from a client/server
-                            send(_fd_map[i],receive(i));
-                            if (_client_fd_map[i] == 1) {
-                                trace_client(_buf);
-                            } else {
-                                trace_server(_buf);
-                            }
-                            _buf[0] = 0;
-                        }
-                    } catch (e_base& e) {
-                        perror(e.id()); // accept connect send & receive , we do not terminate.
+                if (!has_fd(i)) continue;
+                try {
+                    if (_server.is_listener(i)) {
+                        // handle new connections
+                        int fd = _server.accept();
+                        int client_fd = _client.connect(fd);
+                        update_fds(fd, client_fd);
+                    } else {
+                        // we got some data from a client/server
+                        send(_fd_map[i],receive(i));
+                        if (_client_fd_map[i] == 1)
+                            trace_client(_buf);
+                        else
+                            trace_server(_buf);
                     }
+                } catch (e_base& e) {
+                    perror(e.id()); // accept connect send & receive , we do not terminate.
                 }
             }
         }
-        return 0;
     }
 
     void trace_client(char* buf) {
@@ -354,3 +350,4 @@ int main(int argc, char* argv[]) {
         perror(e);
     }
 }
+

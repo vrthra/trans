@@ -35,7 +35,7 @@ class Socket {
         myaddr.sin_port = htons(port);
         memset(myaddr.sin_zero, 0, sizeof myaddr.sin_zero);
         if (::bind(_fd, (struct sockaddr *)&myaddr, sizeof(myaddr)) == -1) {
-            perror("bind");
+            throw "bind";
             exit(1);
         }
     }
@@ -196,10 +196,7 @@ class Trance {
             } else {
                 perror("recv");
             }
-            close(fd); // bye!
-            remove_fd(fd); // remove from master set
-            close(_fd_map[fd]);//remove the pair
-            remove_fd(_fd_map[fd]);
+            remove_fdset(fd); // bye!
             return 0;
         }
         _buf[nbytes] = 0;
@@ -213,6 +210,7 @@ class Trance {
             sent = ::send(fd, _buf + sent, to_send, 0);
             if (sent == -1) {
                 perror("send");
+                remove_fdset(fd); // bye!
                 return -1;
             } else if (sent < size) {
                 to_send = (size - sent);
@@ -220,6 +218,13 @@ class Trance {
                 return 0;
             }
         }
+    }
+
+    void remove_fdset(int fd) {
+        close(fd); // bye!
+        remove_fd(fd); // remove from master set
+        close(_fd_map[fd]); // remove the pair
+        remove_fd(_fd_map[fd]);
     }
 
     void poll() {

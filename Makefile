@@ -1,8 +1,9 @@
 SOLARIS_LIBS = -lsocket -lnsl
-
+OUT=trance
+SRC=trance.cpp
 
 all:
-	g++ trance.cpp -o trance
+	g++ $(SRC) -o $(OUT)
 
 solaris:
-	g++ trance.cpp -o trance $(SOLARIS_LIBS)
+	g++ $(SRC) -o $(OUT) $(SOLARIS_LIBS)

@@ -1,31 +1,40 @@
 #include <iostream>
 #include <map>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdexcept>
 
 using namespace std;
+struct e_base : std::exception {
+    virtual const char* id() = 0;
+};
 
-#define PORT 9034   // port we're listening on
+#define EX(X) struct e_##X: e_base {const char* id() {return #X ;}};
+EX(send)
+EX(recv)
+EX(accept)
+EX(socket)
+EX(setsockopt)
+EX(bind)
+EX(listen)
+EX(select)
+EX(gethostbyname)
+EX(connect)
 
+int yes = 1;
 class Socket {
     int _fd;
     public:
     Socket(int port = 0) {
-        if ((_fd = ::socket(AF_INET, SOCK_STREAM, port)) == -1) {
-            throw "socket";
-        }
-        int yes = 1;
-
-        if (setsockopt(_fd, SOL_SOCKET,SO_REUSEADDR, &yes,sizeof(int)) == -1) {
-            throw "setsockopt";
-        }
+        if ((_fd = ::socket(AF_INET, SOCK_STREAM, port)) == -1)
+            throw e_socket();
+        if (setsockopt(_fd, SOL_SOCKET,SO_REUSEADDR, &yes,sizeof(int)) == -1)
+            throw e_setsockopt();
     }
 
     void bind(int port) {
@@ -34,16 +43,13 @@ class Socket {
         myaddr.sin_addr.s_addr = INADDR_ANY;
         myaddr.sin_port = htons(port);
         memset(myaddr.sin_zero, 0, sizeof myaddr.sin_zero);
-        if (::bind(_fd, (struct sockaddr *)&myaddr, sizeof(myaddr)) == -1) {
-            throw "bind";
-            exit(1);
-        }
+        if (::bind(_fd, (struct sockaddr *)&myaddr, sizeof(myaddr)) == -1)
+            throw e_bind();
     }
 
     void listen(int bl=10) {
-        if (::listen(_fd, bl) == -1) {
-            throw "listen";
-        }
+        if (::listen(_fd, bl) == -1)
+            throw e_listen();
     }
 
     int fd() {
@@ -56,9 +62,8 @@ class Socket {
 
     static struct hostent* gethost(const char* host) {
         struct hostent* he = ::gethostbyname(host);
-        if (!he) {
-            throw "gethostbyname";
-        }
+        if (!he)
+            throw e_gethostbyname();
         return he;
     }
 };
@@ -84,9 +89,11 @@ class Server {
         _sock = 0;
         _listener = create_listener(port);
     }
+
     int get_listener() {
-        return _sock->fd();    
+        return _sock->fd();
     }
+
     ~Server() {
         delete _sock;
         _sock = 0;
@@ -95,14 +102,11 @@ class Server {
     int accept(int fd) {
         struct sockaddr_in remoteaddr; // client address
         socklen_t addrlen = sizeof(remoteaddr);
-        int newfd;        // newly accept()ed socket descriptor
-        if ((newfd = ::accept(fd, (struct sockaddr *)&remoteaddr, &addrlen)) == -1) { 
-            perror("accept");
-            return 0;
-        } else {
-            printf("<%s |%d|\n", inet_ntoa(remoteaddr.sin_addr), newfd);
-            return newfd;
-        }
+        int newfd = ::accept(fd, (struct sockaddr *)&remoteaddr, &addrlen);
+        if(newfd == -1)
+            throw e_accept();
+        cout << "<" << inet_ntoa(remoteaddr.sin_addr) << "|" << newfd << "|" << endl;
+        return newfd;
     }
 
     bool is_listener(int fd) {
@@ -113,21 +117,27 @@ class Server {
 
 class Client {
     Socket* _sock;
-    struct sockaddr_in _addr; // connector's address information 
+    struct sockaddr_in _addr; // connector's address information
     public:
-    Client(const char* host,const int port) {
+    Client(const char* host,const int port) : _sock(0) {
         struct hostent* he = Socket::gethost(host);
-        _addr.sin_family = AF_INET;    // host byte order 
-        _addr.sin_port = htons(port);  // short, network byte order 
+        _addr.sin_family = AF_INET;    // host byte order
+        _addr.sin_port = htons(port);  // short, network byte order
         _addr.sin_addr = *((struct in_addr *)he->h_addr);
         memset(_addr.sin_zero, 0, sizeof _addr.sin_zero);
     }
+
     ~Client() {
+        if (_sock)
+            delete _sock;
     }
+
     int connect() {
         _sock = new Socket();
         if (::connect(_sock->fd(), (struct sockaddr *)&_addr, sizeof(struct sockaddr)) == -1) {
-            throw "connect";
+            delete _sock;
+            _sock = 0;
+            throw e_connect();
         }
         return _sock->fd();
     }
@@ -144,10 +154,9 @@ class Trance {
     std::map<int,int> _client_fd_map;
     bool _color;
     public:
-    Trance(const int port, const char* remote_host, const int remote_port, bool color=true) {
+    Trance(const int port, const char* remote_host, const int remote_port, bool color=true)
+    :_maxfd(0), _color(color) {
         FD_ZERO(&_master);    // clear the master and temp sets
-        _maxfd = 0;
-        _color = color;
         // create a server socket first
         _server = new Server(port);
         add_fd(_server->get_listener());
@@ -156,6 +165,7 @@ class Trance {
 
     ~Trance() {
         delete _server;
+        delete _client;
     }
 
     void add_fd(int fd) {
@@ -188,19 +198,19 @@ class Trance {
     int receive(int fd) {
         // handle data from a client
         int nbytes;
-        if ((nbytes = ::recv(fd, _buf, sizeof(_buf) - 1, 0)) <= 0) {
-            // got error or connection closed by client
-            if (nbytes == 0) {
-                // connection closed
-                printf("|%d|>\n", _fd_map[fd]);
-            } else {
+        nbytes = ::recv(fd, _buf, sizeof(_buf) - 1, 0);
+        switch (nbytes) {
+            case -1:
+                // got error or connection closed by client
                 perror("recv");
-            }
-            remove_fdset(fd); // bye!
-            return 0;
+            case 0:
+                // connection closed
+                remove_fdset(fd); // bye!
+                return 0;
+            default:
+                _buf[nbytes] = 0;
+                return nbytes;
         }
-        _buf[nbytes] = 0;
-        return nbytes;
     }
 
     int send(int fd, int size) {
@@ -208,19 +218,20 @@ class Trance {
         int to_send = size;
         while (to_send) {
             sent = ::send(fd, _buf + sent, to_send, 0);
-            if (sent == -1) {
-                perror("send");
-                remove_fdset(fd); // bye!
-                return -1;
-            } else if (sent < size) {
-                to_send = (size - sent);
-            } else {
-                return 0;
+            switch (sent) {
+                case -1:
+                    perror("send");
+                case 0:
+                    remove_fdset(fd); // bye!
+                    return -1;
+                default:
+                    to_send = (size - sent);
             }
         }
     }
 
     void remove_fdset(int fd) {
+        cout << "|" << _fd_map[fd] << "|>" <<endl;
         close(fd); // bye!
         remove_fd(fd); // remove from master set
         close(_fd_map[fd]); // remove the pair
@@ -229,9 +240,8 @@ class Trance {
 
     void poll() {
         _cur = get_fds();
-        if (select(max_fd() +1, &_cur, NULL, NULL, NULL) == -1) {
-            throw "select";
-        }
+        if (select(max_fd() +1, &_cur, NULL, NULL, NULL) == -1)
+            throw e_select();
     }
 
     int process() {
@@ -240,28 +250,34 @@ class Trance {
             poll();
             // run through the existing connections looking for data to read
             for(int i = 0; i <= max_fd(); i++) {
-                if (has_fd(i)) { // we got one!!
-                    if (_server->is_listener(i)) {
-                        // handle new connections
-                        int fd = _server->accept(i);
-                        // connect to client
-                        int client_fd = _client->connect();
-                        _fd_map[fd] = client_fd;
-                        _client_fd_map[client_fd] = 1;
-                        _fd_map[client_fd] = fd;
-                        // update master set.
-                        add_fd(fd);
-                        add_fd(client_fd);
-                    } else {
-                        // we got some data from a client/server
-                        send(_fd_map[i],receive(i));
-                        if (_client_fd_map[i] == 1) {
-                            trace_client(_buf);
+                int fd = 0;
+                try {
+                    if (has_fd(i)) { // we got one!!
+                        if (_server->is_listener(i)) {
+                            // handle new connections
+                            fd = _server->accept(i);
+                            int client_fd = _client->connect();
+                            _fd_map[fd] = client_fd;
+                            _client_fd_map[client_fd] = 1;
+                            _fd_map[client_fd] = fd;
+                            // update master set.
+                            add_fd(fd);
+                            add_fd(client_fd);
                         } else {
-                            trace_server(_buf);
+                            // we got some data from a client/server
+                            send(_fd_map[i],receive(i));
+                            if (_client_fd_map[i] == 1) {
+                                trace_client(_buf);
+                            } else {
+                                trace_server(_buf);
+                            }
+                            _buf[0] = 0;
                         }
-                        _buf[0] = 0;
                     }
+                } catch (e_base& e) {
+                    // accept & connect , we do not terminate.
+                    perror(e.id());
+                    if (fd) close(fd);
                 }
             }
         }
@@ -349,6 +365,8 @@ int main(int argc, char* argv[]) {
                 usage();
                 return 0;
         }
+    } catch (e_base& e) {
+        perror(e.id());
     } catch (char const * e) {
         perror(e);
     }

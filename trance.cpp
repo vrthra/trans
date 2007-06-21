@@ -273,12 +273,12 @@ class Trance {
         if (_color)
             cout << "\e[34m" << "<[\n" << buf << "]" <<  "\e[0m" << endl;
         else
-            cout << "<[\n" << buf << "]" << endl;
+            cout << ">[\n" << buf << "]" << endl;
     }
 };
 
 void usage() {
-    cout << "trance <port> remote[:port]"<<endl;
+    cout << "trance [-c] <port> remote[:port]"<<endl;
 }
 
 
@@ -288,7 +288,7 @@ int main(int argc, char* argv[]) {
     int c = 0;
     int errflg = 0;
     try {
-        while((c = getopt(argc, argv, "cv")) != -1) {
+        while((c = getopt(argc, argv, "cvh")) != -1) {
             switch (c) {
                 case 'v':
                     _verbose++;
@@ -296,6 +296,9 @@ int main(int argc, char* argv[]) {
                 case 'c':
                     _color--;
                     break;
+                case 'h':
+                    usage();
+                    return(0);
                 default:
                     errflg++;
             }
@@ -341,7 +344,7 @@ int main(int argc, char* argv[]) {
                 usage();
                 return 0;
         }
-    } catch (char* e) {
+    } catch (char const * e) {
         perror(e);
     }
 }

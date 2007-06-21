@@ -1,4 +1,8 @@
-LIBS = -lsocket -lnsl
+SOLARIS_LIBS = -lsocket -lnsl
+
 
 all:
-	g++ trance.cpp -o trance $(LIBS)
+	g++ trance.cpp -o trance
+
+solaris:
+	g++ trance.cpp -o trance $(SOLARIS_LIBS)
